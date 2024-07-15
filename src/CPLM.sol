@@ -5,13 +5,14 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
+import { ReentrancyGuard } from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 import { ISovereignALM } from "@valantis-core/ALM/interfaces/ISovereignALM.sol";
 import { ALMLiquidityQuoteInput, ALMLiquidityQuote } from "@valantis-core/ALM/structs/SovereignALMStructs.sol";
 import { ISovereignPool } from "@valantis-core/pools/interfaces/ISovereignPool.sol";
 import { SovereignPool } from "@valantis-core/pools/SovereignPool.sol";
 
-contract CPLM is ISovereignALM, ERC20 {
+contract CPLM is ISovereignALM, ERC20, ReentrancyGuard {
   using SafeERC20 for IERC20;
 
   error CPLM__onlyPool();
@@ -35,7 +36,7 @@ contract CPLM is ISovereignALM, ERC20 {
     uint256 _shares,
     address _recipient,
     bytes memory _verificationContext
-  ) external returns (uint256 amount0, uint256 amount1) {
+  ) external nonReentrant returns (uint256 amount0, uint256 amount1) {
     uint256 _totalSupply = totalSupply();
 
     // First deposit must be donated directly to the pool
@@ -60,11 +61,15 @@ contract CPLM is ISovereignALM, ERC20 {
     }
   }
 
-  function burn(uint256 _shares, address _recipient, bytes memory _verificationContext) external {
+  function burn(
+    uint256 _shares,
+    address _recipient,
+    bytes memory _verificationContext
+  ) external nonReentrant returns (uint256 amount0, uint256 amount1) {
     (uint256 reserve0, uint256 reserve1) = pool.getReserves();
 
-    uint256 amount0 = Math.mulDiv(reserve0, _shares, totalSupply());
-    uint256 amount1 = Math.mulDiv(reserve1, _shares, totalSupply());
+    amount0 = Math.mulDiv(reserve0, _shares, totalSupply());
+    amount1 = Math.mulDiv(reserve1, _shares, totalSupply());
 
     _burn(msg.sender, _shares);
 
