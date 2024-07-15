@@ -105,12 +105,10 @@ contract CPLM is ISovereignALM, ERC20, ReentrancyGuard {
 
     quote.isCallbackOnSwap = false;
 
-    uint256 k = reserve0 * reserve1;
-
     if (_poolInput.isZeroToOne) {
-      quote.amountOut = reserve1 - (k / (reserve0 + _poolInput.amountInMinusFee));
+      quote.amountOut = (reserve1 * _poolInput.amountInMinusFee) / (reserve0 + _poolInput.amountInMinusFee);
     } else {
-      quote.amountOut = reserve0 - (k / (reserve1 + _poolInput.amountInMinusFee));
+      quote.amountOut = (reserve0 * _poolInput.amountInMinusFee) / (reserve1 + _poolInput.amountInMinusFee);
     }
 
     quote.amountInFilled = _poolInput.amountInMinusFee;
