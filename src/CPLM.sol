@@ -16,7 +16,7 @@ contract CPLM is ISovereignALM, ERC20 {
 
   error CPLM__onlyPool();
 
-  uint256 public constant MINIMUM_LIQUIDITY = 1e3;
+  uint256 public constant MINIMUM_LIQUIDITY = 1e6;
 
   SovereignPool public pool;
 
