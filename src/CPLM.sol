@@ -15,15 +15,36 @@ import { SovereignPool } from "@valantis-core/pools/SovereignPool.sol";
 contract CPLM is ISovereignALM, ERC20, ReentrancyGuard {
   using SafeERC20 for IERC20;
 
+  /************************************************
+   *  ERRORS
+   ***********************************************/
+
   error CPLM__onlyPool();
+  error CPLM__deadlineExpired();
+  error CPLM__priceOutOfRange();
+
+  /************************************************
+   *  CONSTANTS
+   ***********************************************/
 
   uint256 public constant MINIMUM_LIQUIDITY = 1e6;
 
+  /************************************************
+   *  STORAGE
+   ***********************************************/
+
   SovereignPool public pool;
 
+  /************************************************
+   *  CONSTRUCTOR
+   ***********************************************/
   constructor(string memory _name, string memory _symbol, SovereignPool _pool) ERC20(_name, _symbol) {
     pool = _pool;
   }
+
+  /************************************************
+   *  MODIFIERS
+   ***********************************************/
 
   modifier onlyPool() {
     if (msg.sender != address(pool)) {
@@ -32,11 +53,45 @@ contract CPLM is ISovereignALM, ERC20, ReentrancyGuard {
     _;
   }
 
+  /************************************************
+   *  INTERNAL FUNCTIONS
+   ***********************************************/
+
+  function _checkPriceRange(uint256 _priceX192Lower, uint256 _priceX192Upper) internal view {
+    uint256 priceX192 = getPriceX192();
+
+    if (priceX192 < _priceX192Lower && priceX192 > _priceX192Upper) {
+      revert CPLM__priceOutOfRange();
+    }
+  }
+
+  function _checkDeadline(uint256 _deadline) internal view {
+    if (block.timestamp > _deadline) {
+      revert CPLM__deadlineExpired();
+    }
+  }
+
+  /************************************************
+   *  EXTERNAL FUNCTIONS
+   ***********************************************/
+
+  function getPriceX192() public view returns (uint256 priceX192) {
+    (uint256 reserve0, uint256 reserve1) = pool.getReserves();
+    priceX192 = Math.mulDiv(reserve1, 2 ** 192, reserve0);
+  }
+
   function mint(
     uint256 _shares,
     address _recipient,
+    uint256 _deadline,
+    uint256 _priceX192Lower,
+    uint256 _priceX192Upper,
     bytes memory _verificationContext
   ) external nonReentrant returns (uint256 amount0, uint256 amount1) {
+    _checkDeadline(_deadline);
+
+    _checkPriceRange(_priceX192Lower, _priceX192Upper);
+
     uint256 _totalSupply = totalSupply();
 
     // First deposit must be donated directly to the pool
@@ -64,8 +119,15 @@ contract CPLM is ISovereignALM, ERC20, ReentrancyGuard {
   function burn(
     uint256 _shares,
     address _recipient,
+    uint256 _deadline,
+    uint256 _priceX192Lower,
+    uint256 _priceX192Upper,
     bytes memory _verificationContext
   ) external nonReentrant returns (uint256 amount0, uint256 amount1) {
+    _checkDeadline(_deadline);
+
+    _checkPriceRange(_priceX192Lower, _priceX192Upper);
+
     (uint256 reserve0, uint256 reserve1) = pool.getReserves();
 
     amount0 = Math.mulDiv(reserve0, _shares, totalSupply());
