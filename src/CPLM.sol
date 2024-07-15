@@ -54,8 +54,8 @@ contract CPLM is ISovereignALM, ERC20 {
             (uint256 reserve0, uint256 reserve1) = pool.getReserves();
 
             // Normal deposits are made using onDepositLiquidityCallback
-            amount0 = Math.mulDiv(reserve0, _shares, _totalSupply);
-            amount1 = Math.mulDiv(reserve1, _shares, _totalSupply);
+            amount0 = Math.mulDiv(reserve0, _shares, _totalSupply, Math.Rounding.Ceil);
+            amount1 = Math.mulDiv(reserve1, _shares, _totalSupply, Math.Rounding.Ceil);
 
             _mint(_recipient, _shares);
 
