@@ -10,7 +10,6 @@ import { ReentrancyGuard } from "@openzeppelin/contracts/utils/ReentrancyGuard.s
 import { ISovereignALM } from "@valantis-core/ALM/interfaces/ISovereignALM.sol";
 import { ALMLiquidityQuoteInput, ALMLiquidityQuote } from "@valantis-core/ALM/structs/SovereignALMStructs.sol";
 import { ISovereignPool } from "@valantis-core/pools/interfaces/ISovereignPool.sol";
-import { SovereignPool } from "@valantis-core/pools/SovereignPool.sol";
 
 contract CPLM is ISovereignALM, ERC20, ReentrancyGuard {
   using SafeERC20 for IERC20;
@@ -22,24 +21,29 @@ contract CPLM is ISovereignALM, ERC20, ReentrancyGuard {
   error CPLM__onlyPool();
   error CPLM__deadlineExpired();
   error CPLM__priceOutOfRange();
+  error CPLM__burn_insufficientToken0Withdrawn();
+  error CPLM__burn_insufficientToken1Withdrawn();
+  error CPLM__mint_insufficientToken0Deposited();
+  error CPLM__mint_insufficientToken1Deposited();
 
   /************************************************
    *  CONSTANTS
    ***********************************************/
 
-  uint256 public constant MINIMUM_LIQUIDITY = 1e6;
+  uint256 public constant MINIMUM_LIQUIDITY = 1000;
 
   /************************************************
-   *  STORAGE
+   *  IMMUTABLES
    ***********************************************/
 
-  SovereignPool public pool;
+  ISovereignPool public immutable POOL;
 
   /************************************************
    *  CONSTRUCTOR
    ***********************************************/
-  constructor(string memory _name, string memory _symbol, SovereignPool _pool) ERC20(_name, _symbol) {
-    pool = _pool;
+
+  constructor(string memory _name, string memory _symbol, address _pool) ERC20(_name, _symbol) {
+    POOL = ISovereignPool(_pool);
   }
 
   /************************************************
@@ -47,28 +51,10 @@ contract CPLM is ISovereignALM, ERC20, ReentrancyGuard {
    ***********************************************/
 
   modifier onlyPool() {
-    if (msg.sender != address(pool)) {
+    if (msg.sender != address(POOL)) {
       revert CPLM__onlyPool();
     }
     _;
-  }
-
-  /************************************************
-   *  INTERNAL FUNCTIONS
-   ***********************************************/
-
-  function _checkPriceRange(uint256 _priceX192Lower, uint256 _priceX192Upper) internal view {
-    uint256 priceX192 = getPriceX192();
-
-    if (priceX192 < _priceX192Lower && priceX192 > _priceX192Upper) {
-      revert CPLM__priceOutOfRange();
-    }
-  }
-
-  function _checkDeadline(uint256 _deadline) internal view {
-    if (block.timestamp > _deadline) {
-      revert CPLM__deadlineExpired();
-    }
   }
 
   /************************************************
@@ -76,66 +62,75 @@ contract CPLM is ISovereignALM, ERC20, ReentrancyGuard {
    ***********************************************/
 
   function getPriceX192() public view returns (uint256 priceX192) {
-    (uint256 reserve0, uint256 reserve1) = pool.getReserves();
+    (uint256 reserve0, uint256 reserve1) = POOL.getReserves();
     priceX192 = Math.mulDiv(reserve1, 2 ** 192, reserve0);
   }
 
   function mint(
     uint256 _shares,
-    address _recipient,
+    uint256 _amount0Min,
+    uint256 _amount1Min,
     uint256 _deadline,
-    uint256 _priceX192Lower,
-    uint256 _priceX192Upper,
+    address _recipient,
     bytes memory _verificationContext
   ) external nonReentrant returns (uint256 amount0, uint256 amount1) {
     _checkDeadline(_deadline);
 
-    _checkPriceRange(_priceX192Lower, _priceX192Upper);
-
-    uint256 _totalSupply = totalSupply();
+    uint256 totalSupplyCache = totalSupply();
 
     // First deposit must be donated directly to the pool
-    if (_totalSupply == 0) {
-      amount0 = IERC20(pool.token0()).balanceOf(address(this));
-      amount1 = IERC20(pool.token1()).balanceOf(address(this));
+    if (totalSupplyCache == 0) {
+      amount0 = IERC20(POOL.token0()).balanceOf(address(this));
+      amount1 = IERC20(POOL.token1()).balanceOf(address(this));
 
-      _mint(address(0x000000000000000000000000000000000000dEaD), MINIMUM_LIQUIDITY);
+      _mint(address(1), MINIMUM_LIQUIDITY);
 
       // _shares param is ignored for first deposit
-      _mint(_recipient, (amount0 * amount1) - MINIMUM_LIQUIDITY);
+      _mint(_recipient, Math.sqrt(amount0 * amount1) - MINIMUM_LIQUIDITY);
     } else {
-      (uint256 reserve0, uint256 reserve1) = pool.getReserves();
+      (uint256 reserve0, uint256 reserve1) = POOL.getReserves();
 
       // Normal deposits are made using onDepositLiquidityCallback
-      amount0 = Math.mulDiv(reserve0, _shares, _totalSupply, Math.Rounding.Ceil);
-      amount1 = Math.mulDiv(reserve1, _shares, _totalSupply, Math.Rounding.Ceil);
+      amount0 = Math.mulDiv(reserve0, _shares, totalSupplyCache, Math.Rounding.Ceil);
+      amount1 = Math.mulDiv(reserve1, _shares, totalSupplyCache, Math.Rounding.Ceil);
 
       _mint(_recipient, _shares);
 
-      ISovereignPool(pool).depositLiquidity(amount0, amount1, msg.sender, _verificationContext, abi.encode(msg.sender));
+      (amount0, amount1) = POOL.depositLiquidity(
+        amount0,
+        amount1,
+        msg.sender,
+        _verificationContext,
+        abi.encode(msg.sender)
+      );
+
+      if (amount0 < _amount0Min) revert CPLM__mint_insufficientToken0Deposited();
+      if (amount1 < _amount1Min) revert CPLM__mint_insufficientToken1Deposited();
     }
   }
 
   function burn(
     uint256 _shares,
-    address _recipient,
+    uint256 _amount0Min,
+    uint256 _amount1Min,
     uint256 _deadline,
-    uint256 _priceX192Lower,
-    uint256 _priceX192Upper,
+    address _recipient,
     bytes memory _verificationContext
   ) external nonReentrant returns (uint256 amount0, uint256 amount1) {
     _checkDeadline(_deadline);
 
-    _checkPriceRange(_priceX192Lower, _priceX192Upper);
+    (uint256 reserve0, uint256 reserve1) = POOL.getReserves();
 
-    (uint256 reserve0, uint256 reserve1) = pool.getReserves();
+    uint256 totalSupplyCache = totalSupply();
+    amount0 = Math.mulDiv(reserve0, _shares, totalSupplyCache);
+    amount1 = Math.mulDiv(reserve1, _shares, totalSupplyCache);
 
-    amount0 = Math.mulDiv(reserve0, _shares, totalSupply());
-    amount1 = Math.mulDiv(reserve1, _shares, totalSupply());
+    if (amount0 < _amount0Min) revert CPLM__burn_insufficientToken0Withdrawn();
+    if (amount1 < _amount1Min) revert CPLM__burn_insufficientToken1Withdrawn();
 
     _burn(msg.sender, _shares);
 
-    ISovereignPool(pool).withdrawLiquidity(amount0, amount1, msg.sender, _recipient, _verificationContext);
+    POOL.withdrawLiquidity(amount0, amount1, msg.sender, _recipient, _verificationContext);
   }
 
   function onDepositLiquidityCallback(
@@ -146,16 +141,13 @@ contract CPLM is ISovereignALM, ERC20, ReentrancyGuard {
     address user = abi.decode(_data, (address));
 
     if (_amount0 > 0) {
-      IERC20(pool.token0()).safeTransferFrom(user, msg.sender, _amount0);
+      IERC20(POOL.token0()).safeTransferFrom(user, msg.sender, _amount0);
     }
 
     if (_amount1 > 0) {
-      IERC20(pool.token1()).safeTransferFrom(user, msg.sender, _amount1);
+      IERC20(POOL.token1()).safeTransferFrom(user, msg.sender, _amount1);
     }
   }
-
-  // TODO: add onlyPool if any state modifying function is added
-  function onSwapCallback(bool _isZeroToOne, uint256 _amountIn, uint256 _amountOut) external override {}
 
   // TODO: add onlyPool if any state modifying function is added
   function getLiquidityQuote(
@@ -163,9 +155,7 @@ contract CPLM is ISovereignALM, ERC20, ReentrancyGuard {
     bytes calldata,
     bytes calldata
   ) external view override returns (ALMLiquidityQuote memory quote) {
-    (uint256 reserve0, uint256 reserve1) = pool.getReserves();
-
-    quote.isCallbackOnSwap = false;
+    (uint256 reserve0, uint256 reserve1) = POOL.getReserves();
 
     if (_poolInput.isZeroToOne) {
       quote.amountOut = (reserve1 * _poolInput.amountInMinusFee) / (reserve0 + _poolInput.amountInMinusFee);
@@ -174,5 +164,18 @@ contract CPLM is ISovereignALM, ERC20, ReentrancyGuard {
     }
 
     quote.amountInFilled = _poolInput.amountInMinusFee;
+  }
+
+  // solhint-disable-next-line no-empty-blocks
+  function onSwapCallback(bool _isZeroToOne, uint256 _amountIn, uint256 _amountOut) external override {}
+
+  /************************************************
+   *  PRIVATE FUNCTIONS
+   ***********************************************/
+
+  function _checkDeadline(uint256 _deadline) private view {
+    if (block.timestamp > _deadline) {
+      revert CPLM__deadlineExpired();
+    }
   }
 }
