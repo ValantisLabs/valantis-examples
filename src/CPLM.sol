@@ -11,6 +11,9 @@ import { ISovereignALM } from "@valantis-core/ALM/interfaces/ISovereignALM.sol";
 import { ALMLiquidityQuoteInput, ALMLiquidityQuote } from "@valantis-core/ALM/structs/SovereignALMStructs.sol";
 import { ISovereignPool } from "@valantis-core/pools/interfaces/ISovereignPool.sol";
 
+/**
+  @title Constant Product Liquidity Module.
+ */
 contract CPLM is ISovereignALM, ERC20, ReentrancyGuard {
   using SafeERC20 for IERC20;
 
@@ -21,10 +24,14 @@ contract CPLM is ISovereignALM, ERC20, ReentrancyGuard {
   error CPLM__onlyPool();
   error CPLM__deadlineExpired();
   error CPLM__priceOutOfRange();
+  error CPLM__burn_bothAmountsZero();
   error CPLM__burn_insufficientToken0Withdrawn();
   error CPLM__burn_insufficientToken1Withdrawn();
+  error CPLM__burn_zeroShares();
   error CPLM__mint_insufficientToken0Deposited();
   error CPLM__mint_insufficientToken1Deposited();
+  error CPLM__mint_invalidRecipient();
+  error CPLM__mint_zeroShares();
 
   /************************************************
    *  CONSTANTS
@@ -61,11 +68,17 @@ contract CPLM is ISovereignALM, ERC20, ReentrancyGuard {
    *  EXTERNAL FUNCTIONS
    ***********************************************/
 
-  function getPriceX192() public view returns (uint256 priceX192) {
-    (uint256 reserve0, uint256 reserve1) = POOL.getReserves();
-    priceX192 = Math.mulDiv(reserve1, 2 ** 192, reserve0);
-  }
-
+  /**
+      @notice Deposit liquidity into `POOL` and mint LP tokens.
+      @param _shares Amount of LP tokens to mint.
+      @param _amount0Min Minimum amount of token0 required.
+      @param _amount1Min Minimum amount of token1 required.
+      @param _deadline Block timestamp after which this call reverts.
+      @param _recipient Address to mint LP tokens for.
+      @param _verificationContext Bytes encoded calldata for POOL's Verifier Module, if applicable.
+      @return amount0 Amount of token0 deposited.
+      @return amount1 Amount of token1 deposited. 
+   */
   function mint(
     uint256 _shares,
     uint256 _amount0Min,
@@ -75,6 +88,8 @@ contract CPLM is ISovereignALM, ERC20, ReentrancyGuard {
     bytes memory _verificationContext
   ) external nonReentrant returns (uint256 amount0, uint256 amount1) {
     _checkDeadline(_deadline);
+
+    if (_recipient == address(0)) revert CPLM__mint_invalidRecipient();
 
     uint256 totalSupplyCache = totalSupply();
 
@@ -88,11 +103,16 @@ contract CPLM is ISovereignALM, ERC20, ReentrancyGuard {
       // _shares param is ignored for first deposit
       _mint(_recipient, Math.sqrt(amount0 * amount1) - MINIMUM_LIQUIDITY);
     } else {
+      if (_shares == 0) revert CPLM__mint_zeroShares();
+
       (uint256 reserve0, uint256 reserve1) = POOL.getReserves();
 
       // Normal deposits are made using onDepositLiquidityCallback
       amount0 = Math.mulDiv(reserve0, _shares, totalSupplyCache, Math.Rounding.Ceil);
       amount1 = Math.mulDiv(reserve1, _shares, totalSupplyCache, Math.Rounding.Ceil);
+
+      if (amount0 < _amount0Min) revert CPLM__mint_insufficientToken0Deposited();
+      if (amount1 < _amount1Min) revert CPLM__mint_insufficientToken1Deposited();
 
       _mint(_recipient, _shares);
 
@@ -103,12 +123,20 @@ contract CPLM is ISovereignALM, ERC20, ReentrancyGuard {
         _verificationContext,
         abi.encode(msg.sender)
       );
-
-      if (amount0 < _amount0Min) revert CPLM__mint_insufficientToken0Deposited();
-      if (amount1 < _amount1Min) revert CPLM__mint_insufficientToken1Deposited();
     }
   }
 
+  /**
+      @notice Withdraw liquidity from `POOL` and burn LP tokens.
+      @param _shares Amount of LP tokens to burn.
+      @param _amount0Min Minimum amount of token0 required for `_recipient`.
+      @param _amount1Min Minimum amount of token1 required for `_recipient`.
+      @param _deadline Block timestamp after which this call reverts.
+      @param _recipient Address to receive token0 and token1 amounts.
+      @param _verificationContext Bytes encoded calldata for POOL's Verifier Module, if applicable.
+      @return amount0 Amount of token0 withdrawn. WARNING: Potentially innacurate in case token0 is rebase.
+      @return amount1 Amount of token1 withdrawn. WARNING: Potentially innacurate in case token1 is rebase.
+   */
   function burn(
     uint256 _shares,
     uint256 _amount0Min,
@@ -119,11 +147,15 @@ contract CPLM is ISovereignALM, ERC20, ReentrancyGuard {
   ) external nonReentrant returns (uint256 amount0, uint256 amount1) {
     _checkDeadline(_deadline);
 
+    if (_shares == 0) revert CPLM__burn_zeroShares();
+
     (uint256 reserve0, uint256 reserve1) = POOL.getReserves();
 
     uint256 totalSupplyCache = totalSupply();
     amount0 = Math.mulDiv(reserve0, _shares, totalSupplyCache);
     amount1 = Math.mulDiv(reserve1, _shares, totalSupplyCache);
+
+    if (amount0 == 0 && amount1 == 0) revert CPLM__burn_bothAmountsZero();
 
     if (amount0 < _amount0Min) revert CPLM__burn_insufficientToken0Withdrawn();
     if (amount1 < _amount1Min) revert CPLM__burn_insufficientToken1Withdrawn();
@@ -133,6 +165,9 @@ contract CPLM is ISovereignALM, ERC20, ReentrancyGuard {
     POOL.withdrawLiquidity(amount0, amount1, msg.sender, _recipient, _verificationContext);
   }
 
+  /**
+    @notice Callback to transfer tokens from user into `POOL` during deposits. 
+   */
   function onDepositLiquidityCallback(
     uint256 _amount0,
     uint256 _amount1,
@@ -150,6 +185,11 @@ contract CPLM is ISovereignALM, ERC20, ReentrancyGuard {
   }
 
   // TODO: add onlyPool if any state modifying function is added
+  /**
+      @notice Swap callback from POOL.
+      @param _poolInput Contains fundamental data about the swap. 
+      @return quote Quote information that prices tokenIn and tokenOut.
+   */
   function getLiquidityQuote(
     ALMLiquidityQuoteInput memory _poolInput,
     bytes calldata,
@@ -167,7 +207,7 @@ contract CPLM is ISovereignALM, ERC20, ReentrancyGuard {
   }
 
   // solhint-disable-next-line no-empty-blocks
-  function onSwapCallback(bool _isZeroToOne, uint256 _amountIn, uint256 _amountOut) external override {}
+  function onSwapCallback(bool /*_isZeroToOne*/, uint256 /*_amountIn*/, uint256 /*_amountOut*/) external override {}
 
   /************************************************
    *  PRIVATE FUNCTIONS
