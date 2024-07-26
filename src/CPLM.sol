@@ -13,6 +13,8 @@ import { ISovereignPool } from "@valantis-core/pools/interfaces/ISovereignPool.s
 
 /**
   @title Constant Product Liquidity Module.
+  @dev UniswapV2 style constant product,
+       implemented as a Valantis Sovereign Liquidity Module.
  */
 contract CPLM is ISovereignALM, ERC20, ReentrancyGuard {
   using SafeERC20 for IERC20;
@@ -43,6 +45,10 @@ contract CPLM is ISovereignALM, ERC20, ReentrancyGuard {
    *  IMMUTABLES
    ***********************************************/
 
+  /**
+    @dev SovereignPool is both the entry point contract for swaps (via `swap` function),
+         and the contract in which token0 and token1 balances should be stored.
+   */
   ISovereignPool public immutable POOL;
 
   /************************************************
@@ -100,14 +106,14 @@ contract CPLM is ISovereignALM, ERC20, ReentrancyGuard {
 
       _mint(address(1), MINIMUM_LIQUIDITY);
 
-      // _shares param is ignored for first deposit
+      // _shares param is ignored during first deposit
       _mint(_recipient, Math.sqrt(amount0 * amount1) - MINIMUM_LIQUIDITY);
     } else {
       if (_shares == 0) revert CPLM__mint_zeroShares();
 
       (uint256 reserve0, uint256 reserve1) = POOL.getReserves();
 
-      // Normal deposits are made using onDepositLiquidityCallback
+      // Normal deposits are made using `onDepositLiquidityCallback`
       amount0 = Math.mulDiv(reserve0, _shares, totalSupplyCache, Math.Rounding.Ceil);
       amount1 = Math.mulDiv(reserve1, _shares, totalSupplyCache, Math.Rounding.Ceil);
 
@@ -116,6 +122,8 @@ contract CPLM is ISovereignALM, ERC20, ReentrancyGuard {
 
       _mint(_recipient, _shares);
 
+      // Token amounts deposited might differ in case of rebase tokens,
+      // so we update these after transfers to `POOL` have been executed
       (amount0, amount1) = POOL.depositLiquidity(
         amount0,
         amount1,
@@ -157,6 +165,7 @@ contract CPLM is ISovereignALM, ERC20, ReentrancyGuard {
 
     if (amount0 == 0 && amount1 == 0) revert CPLM__burn_bothAmountsZero();
 
+    // Slippage protection checks
     if (amount0 < _amount0Min) revert CPLM__burn_insufficientToken0Withdrawn();
     if (amount1 < _amount1Min) revert CPLM__burn_insufficientToken1Withdrawn();
 
@@ -184,7 +193,6 @@ contract CPLM is ISovereignALM, ERC20, ReentrancyGuard {
     }
   }
 
-  // TODO: add onlyPool if any state modifying function is added
   /**
       @notice Swap callback from POOL.
       @param _poolInput Contains fundamental data about the swap. 
