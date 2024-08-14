@@ -14,15 +14,6 @@
     "prettier": "^3.0.0",
     "solhint": "^3.6.2"
   },
-  "keywords": [
-    "blockchain",
-    "ethereum",
-    "forge",
-    "foundry",
-    "smart-contracts",
-    "solidity",
-    "template"
-  ],
   "private": true,
   "scripts": {
     "clean": "rm -rf cache out",

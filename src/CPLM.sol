@@ -57,7 +57,7 @@ contract CPLM is ISovereignALM, ERC20, ReentrancyGuard {
    *  CONSTRUCTOR
    ***********************************************/
 
-  constructor(string memory _name, string memory _symbol, address _pool) ERC20(_name, _symbol) {
+  constructor(address _pool) ERC20("Valantis CPLM LP Token", "CPLM") {
     if (_pool == address(0)) revert CPLM__constructor_invalidPool();
 
     POOL = ISovereignPool(_pool);
