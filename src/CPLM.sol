@@ -26,6 +26,8 @@ contract CPLM is ISovereignALM, ERC20, ReentrancyGuard {
   error CPLM__deadlineExpired();
   error CPLM__onlyPool();
   error CPLM__priceOutOfRange();
+  error CPLM__constructor_customSovereignVaultNotAllowed();
+  error CPLM__constructor_invalidPool();
   error CPLM__burn_bothAmountsZero();
   error CPLM__burn_insufficientToken0Withdrawn();
   error CPLM__burn_insufficientToken1Withdrawn();
@@ -56,7 +58,11 @@ contract CPLM is ISovereignALM, ERC20, ReentrancyGuard {
    ***********************************************/
 
   constructor(string memory _name, string memory _symbol, address _pool) ERC20(_name, _symbol) {
+    if (_pool == address(0)) revert CPLM__constructor_invalidPool();
+
     POOL = ISovereignPool(_pool);
+
+    if (POOL.sovereignVault() != _pool) revert CPLM__constructor_customSovereignVaultNotAllowed();
   }
 
   /************************************************
@@ -202,8 +208,8 @@ contract CPLM is ISovereignALM, ERC20, ReentrancyGuard {
    */
   function getLiquidityQuote(
     ALMLiquidityQuoteInput memory _poolInput,
-    bytes calldata,
-    bytes calldata
+    bytes calldata /*_externalContext*/,
+    bytes calldata /*_verifierData*/
   ) external view override returns (ALMLiquidityQuote memory quote) {
     (uint256 reserve0, uint256 reserve1) = POOL.getReserves();
 
