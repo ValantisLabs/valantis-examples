@@ -4,8 +4,13 @@ cache
 coverage
 node_modules
 out
+lib
 
 # files
+.prettierrc
+*.yml
+*.md
+*.json
 *.env
 *.log
 .DS_Store

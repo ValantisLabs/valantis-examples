@@ -12,18 +12,17 @@
   "devDependencies": {
     "forge-std": "github:foundry-rs/forge-std#v1.8.1",
     "prettier": "^3.0.0",
-    "solhint": "^3.6.2"
+    "solhint": "^3.6.2",
+    "ts-node": "^10.9.2"
   },
   "private": true,
   "scripts": {
     "clean": "rm -rf cache out",
     "build": "forge build",
-    "lint": "bun run lint:sol && bun run prettier:check",
-    "lint:sol": "forge fmt --check && bun solhint {script,src,test}/**/*.sol",
-    "prettier:check": "prettier --check \"**/*.{json,md,yml}\" --ignore-path \".prettierignore\"",
-    "prettier:write": "prettier --write \"**/*.{json,md,yml}\" --ignore-path \".prettierignore\"",
+    "lint": "solhint 'src/**/*.sol'",
+    "format": "npx prettier --write .",
     "test": "forge test",
     "test:coverage": "forge coverage",
-    "test:coverage:report": "forge coverage --report lcov && genhtml lcov.info --branch-coverage --output-dir coverage"
+    "test:coverage:lcov": "forge coverage --report lcov && lcov --remove ./lcov.info -o ./lcov.info.pruned && genhtml lcov.info.pruned -o coverage/html && open coverage/html/index.html"
   }
 }
